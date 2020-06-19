@@ -1,0 +1,324 @@
+---
+title: "Admission Prediction Report"
+author: "Paris Rerkshanandana"
+date: "6/15/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+options(knitr.table.format = "latex")
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(corrplot)) install.packages("corrplot", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+if(!require(kableExtra)) install.packages("kableExtra", repos = "http://cran.us.r-project.org")
+if(!require(formattable)) install.packages("formattable", repos = "http://cran.us.r-project.org")
+```
+
+
+## Overview
+
+In this project, I will be predicting the chance of admission of graduate students in the Graduate-Admission-2 dataset (links: https://www.kaggle.com/mohansacharya/graduate-admissions). I will be trying various machine-learning algorithms to see which approach works best with the dataset and how I can improve it. I will implement linear Regression Model, KNN, Random Forest, and some other models and ensembles them together. This report will go through various steps I took to build the final model for the project.
+
+## Data Wrangling
+
+First, I downloaded the dataset using read_csv() and stored it in dat.
+```{r data wrangling, echo = TRUE,  results = 'hide', message=FALSE}
+tmp=tempfile()
+download.file("https://raw.githubusercontent.com/PRerk/Graduate-Admission-Prediction/master/datasets_14872_228180_Admission_Predict_Ver1.1.csv",tmp)
+dat <- read_csv(tmp)
+file.remove(tmp)
+```
+
+Then I look at the structure of the data.
+```{r data structure}
+str(dat)
+```
+
+Viewing the first few row of the data.
+```{r data view}
+head(dat)
+```
+
+And checks if any row contain NA.
+```{r data cleaning}
+sum(!complete.cases(dat))
+```
+
+After Inspecting the dataset, The data looks well-formatted, and there seem to be no missing values in it. here all features are numeric and can be passed on to our model directly without any transformation.
+I will now divide the data into a train set and test set using this code.
+
+```{r data partitioning, warning=FALSE}
+set.seed(1,sample.kind = "Rounding")
+test_index <- createDataPartition(y = dat$`Chance of Admit`, times = 1, p = 0.2, 
+                                  list = FALSE)
+train_set <- dat[-test_index,]
+test_set <- dat[test_index,]
+```
+
+Here I partition 20% of data as the test set and rest is used for training. 
+
+## Loss function
+
+The loss function I am going to use here is the residual mean squared error (RMSE). I will be estimating the performance of the models based on the residual mean squared error (RMSE) calculated on the test set.
+
+```{r RMSE}
+RMSE <- function(true_ratings, predicted_ratings){
+  sqrt(mean((true_ratings - predicted_ratings)^2))
+}
+```
+
+## Features Analysis
+
+Now I will compute the Correlation Matrix on the training set to see the dependence between the features of the data.
+
+```{r cor, warning=FALSE, message=FALSE}
+res <- cor(train_set)
+round(res, 2)
+
+corrplot(res, type = "upper", order = "hclust", 
+         tl.col = "black", tl.srt = 45)
+``` 
+
+It can be seen that the chance of admission has a strong positives correlation with CGPA, GRE score, and TOEFL score. This is apparent since higher-scoring students tends to get admitted more easily.
+
+## predictive modeling for 'chance of admission'
+
+### Linear Regression
+
+First, I will implement Linear Regression model on the dataset using the train() function of the caret package.
+
+```{r lm}
+train_lm <- train(`Chance of Admit`~.,
+                  data = train_set,
+                  method = "lm"
+                  )
+pred_lm <- predict(train_lm, test_set)
+rmse_lm <- RMSE(test_set$`Chance of Admit`,pred_lm)
+rmse_results <- tibble(method = "lm", RMSE = rmse_lm)
+``` 
+
+```{r lm result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+``` 
+
+We get the RMSE of 0.0631181.
+lets inspect the first few row of predicted value and true value.
+
+```{r lm compare, echo=FALSE}
+head(as.vector(pred_lm))
+head(test_set$`Chance of Admit`)
+```
+
+I think Linear Regression perform quite well on this dataset.
+
+### k-nearest neighbors
+
+```{r knn}
+train_knn <- train(`Chance of Admit`~.,
+                  data = train_set,
+                  method = "knn",
+                  tuneGrid = data.frame(k = c(3,5,7,9,11)))
+pred_knn <- predict(train_knn, test_set)
+rmse_knn <- RMSE(test_set$`Chance of Admit`,pred_knn)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="knn",
+                                     RMSE = rmse_knn ))
+``` 
+
+```{r knn result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+``` 
+
+Using K-nn we get RMSE of 0.0668677. 
+
+K-nn while tuning with different value of K still gives the same RMSE as the default values. The RMSE of knn is comparetivly higher than that of Linear Regreesion and so its not a very good model to use with this dataset.
+
+### Random forests
+
+```{r rf}
+train_rf <- train(`Chance of Admit`~.,
+                   data = train_set,
+                   method = "rf")
+pred_rf <- predict(train_rf, test_set)
+rmse_rf <- RMSE(test_set$`Chance of Admit`,pred_rf)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="rf",
+                                 RMSE = rmse_rf ))
+``` 
+
+```{r rf result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+``` 
+
+We get RMSE as low as 0.0564256 using rf. we can see that Random Forests clearly outperformed k-nn and linear regression here.
+
+### Artificial neural network
+
+Artificial neural networks have grabbed a lot of attention recently. A neural network can be designed to detect patterns in input data and produce an output free of noise. I will be implementing an Artificial neural network using nnet method of train() function of the caret package.
+
+```{r nnet, results = 'hide', message=FALSE, warning=FALSE}
+train_nnet <- train(`Chance of Admit`~.,
+                    data = train_set,
+                    method = "nnet")
+pred_nnet <- predict(train_nnet, test_set)
+rmse_nnet <- RMSE(test_set$`Chance of Admit`,pred_nnet)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="nnet",
+                                 RMSE = rmse_nnet ))
+``` 
+
+```{r nnet result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Using nnet, I get varying results of RMSE between 5 to 8. This is likely due to lack of data since Neural Networks require much more data than traditional Machine Learning algorithms to do their job well. So I would say nnet is not a very reliable model to use here.
+
+### Ensemble: Linear Regression and Random Forests
+
+We can see that Random Forest gives significantly better performance than the k-nn and the Linear Regression model. I will ensemble Random Forest and Linear regression to see if I can get better results with the new model. The chance of admission of the ensemble model will be calculated by averaging the predicted values of Random Forest and Linear Regression. k-nn and nnet are not ensembled here because k-nn did not perform very well with this dataset and nnet is not at all reliable here.
+
+```{r en}
+pred_en <- (pred_lm+pred_rf)/2
+rmse_en <- RMSE(test_set$`Chance of Admit`,pred_en)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="ensemble: lm + rf",
+                                 RMSE = rmse_en ))
+``` 
+
+```{r en result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+With RMSE of 0.0587080, our new model performed better than Linear Regression but still not better than the Random Forests. We did not succeed in improving the model so I will be trying some more different models.
+
+Since the Random Forests performed very well with this dataset, I will be try two models similar to Random Forests. 
+
+They are
+
+1. Gradient Boosted Model
+
+2. Support Vector Machine 
+
+### Gradient Boosted Model
+
+The Gradient Boosted Model produces a prediction model composed of an ensemble of decision trees. The distinguishing characteristic of the GBM is that it builds its trees one tree at a time. Each new tree helps to correct errors made by the previously trained tree`—unlike in the Random Forest model, in which the trees bear no relation. 
+
+```{r gbm, results = 'hide', message=FALSE}
+train_gbm <- train(`Chance of Admit`~.,
+                    data = train_set,
+                    method = "gbm")
+pred_gbm <- predict(train_nnet, test_set)
+rmse_gbm <- RMSE(test_set$`Chance of Admit`,pred_gbm)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="gbm",
+                                 RMSE = rmse_gbm ))
+``` 
+
+```{r gbm result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+GBM gives the RMSE of 0.0637076 which is still far from what we get with the Random Forests.
+
+### Support Vector Machine
+
+A Support Vector Machine (SVM), given labeled training data (supervised learning), the algorithm outputs an optimal hyperplane that categorizes new examples.  
+
+```{r svm, results = 'hide', message=FALSE}
+train_svm <- train(`Chance of Admit`~.,
+                   data = train_set,
+                   method = "svmLinear")
+
+pred_svm <- predict(train_svm, test_set)
+rmse_svm <- RMSE(test_set$`Chance of Admit`,pred_svm)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="svm linear",
+                                 RMSE = rmse_svm ))
+``` 
+
+```{r svm result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Here we get RMSE of 0.0632642, a bit lower than that of GBM but we still a lot higher than the Random forests.
+
+Support vector machine methods can handle both linear and non-linear class boundaries. the SVM algorithm can perform a non-linear classification using the kernel trick. The most commonly used kernel transformations are polynomial kernel and radial kernel. We will try using a radial kernel.
+
+```{r svm radial}
+train_svm_radial <- train(`Chance of Admit`~.,
+                   data = train_set,
+                   method = "svmRadial")
+pred_svm_radial <- predict(train_svm_radial, test_set)
+rmse_svm_radial <- RMSE(test_set$`Chance of Admit`,pred_svm_radial)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="svm non linear - radial",
+                                 RMSE = rmse_svm_radial ))
+```
+
+```{r svm radial result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Here we get RMSE of 0.0579285 which is almost as good as with the Random Forests we can see that it performed significantly better than other models.
+
+I won't be implementing SVM using polynomial kernel here since it gives similar results to other models and not much improvement over others.
+
+the code for executing SVM using polynomial kernel is given below:
+
+```{r svm poly, eval=FALSE}
+train_svm_Poly <- train(`Chance of Admit`~.,
+                          data = train_set,
+                          method = "svmPoly")
+```
+
+### Ensemble: Random Forests and SVM Radial
+
+I will ensemble the two best performing models i.e Random Forests and SVM Radial.
+These two models performed much better than the rest. We will see if the new model will perform better than Random Forests.
+
+```{r en two}
+pred_en2 <- (pred_rf+pred_svm_radial)/2
+rmse_en2 <- RMSE(test_set$`Chance of Admit`,pred_en2)
+rmse_results <- bind_rows(rmse_results,
+                          tibble(method="ensemble rf + svm radial",
+                                 RMSE = rmse_en2 ))
+``` 
+
+```{r en two result, echo=FALSE}
+rmse_results %>% knitr::kable() %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Our new model clearly outperformed all our previous model. With RMSE of 0.0562957, it performed slightly better than Random Forests.
+
+## Results
+
+The results of all the models implemented in this project are shown below
+```{r result, echo=FALSE}
+rmse_results %>% knitr::kable(escape = F) %>% kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+We can see that our new model and Random forests performed very well with this dataset compared to other models with most of them having RMSE of above 6.
+
+Inspecting rows of true value and predicted value.
+
+```{r compare, echo=FALSE}
+head(as.vector(pred_en2))
+head(test_set$`Chance of Admit`)
+```
+
+Our predicted value here is quite close to the true value and is good enough to be used in real-life scenarios.
+
+I have tried testing the model with multiple seeds and found out that our new ensembled model and random forests outperformed all models with some of the time random forest performing better and vice versa.
+
+## conclusion
+
+Finally, I would conclude that the new model performed quite well in this scenario and can be implemented in the real world for helping students estimate their chance of admission to college. The limitation I found is that the data set is too small to be used on most models. In the future, I will try to expand the dataset by combining data from other sources online as well as trying out other different models and try to improve upon it.
+
+
